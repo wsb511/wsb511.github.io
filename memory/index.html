@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>记忆库导入</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1b; --muted:#6b6a66; --line:#e3e1dc; --accent:#2f5d50; --warn:#9a3b1e; --ok:#2f6b3a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151514; --card:#1f1f1d; --ink:#ecebe7; --muted:#9d9b95; --line:#33322f; --accent:#7fb3a3; --warn:#e08a6b; --ok:#8cc596; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 14px; }
+  section.off { opacity: .45; pointer-events: none; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  h2 .n { display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; border-radius:50%; background:var(--accent); color:var(--card); font-size:13px; margin-right:8px; }
+  input[type=email] { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font-size: 15px; }
+  button { margin-top: 10px; padding: 9px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--card); font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .msg { margin-top: 10px; color: var(--muted); white-space: pre-wrap; }
+  .msg.err { color: var(--warn); } .msg.ok { color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  td { padding: 5px 0; border-bottom: 1px solid var(--line); } td:last-child { text-align: right; }
+  progress { width: 100%; height: 10px; margin-top: 10px; }
+  label.chk { display:block; margin-top: 10px; color: var(--muted); }
+  .foot { color: var(--muted); font-size: 13px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>记忆库导入</h1>
+  <p class="sub">把 Claude / ChatGPT 的官方导出包导入你自己的记忆库。文件在本机浏览器里解析，直接写入你的数据库，不经过任何第三方。</p>
+
+  <section id="s1">
+    <h2><span class="n">1</span>登录</h2>
+    <div id="loginForm">
+      <input id="email" type="email" value="wsb511@gmail.com" autocomplete="email">
+      <input id="password" type="password" placeholder="密码（至少 8 位）" autocomplete="current-password" style="margin-top:8px">
+      <button id="signIn">登录</button>
+      <button id="signUp" class="ghost">第一次使用：设置密码</button>
+      <div id="loginMsg" class="msg"></div>
+    </div>
+    <div id="loggedIn" hidden>
+      <div id="whoami" class="msg ok"></div>
+      <button id="logout" class="ghost">退出登录</button>
+    </div>
+  </section>
+
+  <section id="s2" class="off">
+    <h2><span class="n">2</span>选择导出文件</h2>
+    <div>选择下载好的导出包（例如 <b>conversations-000.zip</b>），不用解压。</div>
+    <input id="file" type="file" accept=".zip,.json,.jsonl" style="margin-top:10px">
+    <div id="parseMsg" class="msg"></div>
+    <table id="summary" hidden></table>
+  </section>
+
+  <section id="s3" class="off">
+    <h2><span class="n">3</span>导入</h2>
+    <div>你的消息存全文；AI 回答只存开头 500 字，全文仍在原对话和导出包里。重复导入不会产生重复。</div>
+    <label class="chk"><input id="fullExport" type="checkbox" checked> 这是完整导出（把平台上已删除的对话标记为"已删除"，数据保留）</label>
+    <button id="go">开始导入</button>
+    <progress id="bar" value="0" max="1" hidden></progress>
+    <div id="importMsg" class="msg"></div>
+  </section>
+
+  <p class="foot">只有记忆库主人的邮箱能登录后导入；其他人即使登录也会被拒绝。</p>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="convert.js"></script>
+<script>
+(() => {
+  const SUPABASE_URL = "https://hxionucwlpdsmhtdsemf.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_YYB2gyUB2Hl1ztgWoLFlaA__WIogFiO"; // 公开密钥，按设计可放在网页里；权限由登录身份决定
+  const BATCH_BYTES = 700 * 1024, BATCH_COUNT = 40;
+
+  const $ = (id) => document.getElementById(id);
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: { persistSession: true, detectSessionInUrl: true, flowType: "implicit" },
+  });
+  const state = { parsed: null };
+  window.__memImport = state; // 便于排查
+
+  const say = (el, text, cls = "") => { el.textContent = text; el.className = "msg " + cls; };
+  const fmt = (n) => Number(n).toLocaleString("zh-CN");
+
+  // ---------- 1. 登录 ----------
+  async function refreshAuth() {
+    const { data: { session } } = await db.auth.getSession();
+    $("loginForm").hidden = !!session;
+    $("loggedIn").hidden = !session;
+    if (!session) { $("s2").classList.add("off"); $("s3").classList.add("off"); return; }
+    const { data, error } = await db.rpc("owner_stats");
+    if (error) {
+      say($("whoami"), `已登录：${session.user.email}\n但这个账号不是记忆库主人，无权导入。`, "err");
+      return;
+    }
+    say($("whoami"), `已登录：${session.user.email}\n库内现有 ${fmt(data.conversations)} 个对话，数据库已用 ${data.db_size_mb} MB / ${data.db_limit_mb} MB`, "ok");
+    $("s2").classList.remove("off");
+    if (state.parsed) $("s3").classList.remove("off");
+  }
+
+  const creds = () => ({ email: $("email").value.trim(), password: $("password").value });
+
+  $("signIn").onclick = async () => {
+    const c = creds();
+    if (!c.email || !c.password) return say($("loginMsg"), "请填写邮箱和密码。", "err");
+    $("signIn").disabled = true;
+    const { error } = await db.auth.signInWithPassword(c);
+    $("signIn").disabled = false;
+    if (!error) return;
+    if (/confirm/i.test(error.message)) say($("loginMsg"), "邮箱还没确认：请先去邮箱点开确认邮件里的链接，再回来登录。", "err");
+    else if (/invalid/i.test(error.message)) say($("loginMsg"), "邮箱或密码不对。第一次使用请点「第一次使用：设置密码」。", "err");
+    else say($("loginMsg"), "登录失败：" + error.message, "err");
+  };
+
+  $("signUp").onclick = async () => {
+    const c = creds();
+    if (!c.email) return say($("loginMsg"), "请填写邮箱。", "err");
+    if (!c.password || c.password.length < 8) return say($("loginMsg"), "请在上面设置一个至少 8 位的密码。", "err");
+    $("signUp").disabled = true;
+    const { data, error } = await db.auth.signUp(c);
+    $("signUp").disabled = false;
+    if (error) return say($("loginMsg"), "设置失败：" + error.message, "err");
+    if (data.session) return; // 项目未开启邮箱确认时会直接登录
+    say($("loginMsg"),
+      "密码已设置。现在去邮箱，点开 Supabase 发来的确认邮件里的链接。\n" +
+      "点完后浏览器会跳到一个打不开的页面（localhost），这是正常的，确认已经完成。\n" +
+      "然后回到这个页面，输入邮箱和密码，点「登录」。", "ok");
+  };
+  $("logout").onclick = async () => { await db.auth.signOut(); refreshAuth(); };
+  db.auth.onAuthStateChange(() => refreshAuth());
+
+  // ---------- 2. 解析 ----------
+  async function readEntries(file) {
+    const name = file.name.toLowerCase();
+    if (!name.endsWith(".zip")) return [{ name: file.name, text: await file.text() }];
+    const zip = await JSZip.loadAsync(file);
+    const out = [];
+    for (const entry of Object.values(zip.files)) {
+      if (entry.dir) continue;
+      const n = entry.name.toLowerCase();
+      if (n.endsWith(".json") || n.endsWith(".jsonl")) out.push({ name: entry.name, entry });
+    }
+    state.zipEntries = Object.keys(zip.files);
+    return out;
+  }
+
+  function parseText(name, text) {
+    if (name.toLowerCase().endsWith(".jsonl")) {
+      return text.split("\n").filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    }
+    return MemConvert.flattenItems(JSON.parse(text));
+  }
+
+  $("file").onchange = async (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    $("s3").classList.add("off");
+    $("summary").hidden = true;
+    say($("parseMsg"), `正在读取 ${file.name}（${(file.size / 1048576).toFixed(1)} MB）……大文件可能需要一两分钟，请不要关闭页面。`);
+    try {
+      const entries = await readEntries(file);
+      let items = [];
+      state.entryReport = [];
+      for (const e of entries) {
+        const text = e.text ?? (await e.entry.async("string"));
+        let got = [];
+        try { got = parseText(e.name, text); } catch (err) { state.entryReport.push({ name: e.name, error: String(err) }); continue; }
+        const src = MemConvert.detectSource(got);
+        state.entryReport.push({ name: e.name, items: got.length, source: src, sampleKeys: got[0] ? Object.keys(got[0]).slice(0, 15) : [] });
+        if (src) items = items.concat(got);
+      }
+      const { source, conversations } = MemConvert.convertAll(items);
+      if (!source || !conversations.length) {
+        say($("parseMsg"), "没有在文件里找到对话记录。请确认选的是 conversations 开头的导出包。", "err");
+        return;
+      }
+      state.parsed = { source, conversations };
+      let nMsg = 0, userChars = 0, aiChars = 0, first = null, last = null;
+      for (const c of conversations) {
+        for (const m of c.messages) {
+          nMsg++;
+          if (m.role === "user") userChars += m.content.length; else aiChars += m.content.length;
+        }
+        if (c.created_at && (!first || c.created_at < first)) first = c.created_at;
+        if (c.updated_at && (!last || c.updated_at > last)) last = c.updated_at;
+      }
+      const rows = [
+        ["来源", source === "claude" ? "Claude" : "ChatGPT"],
+        ["对话数", fmt(conversations.length)],
+        ["消息数", fmt(nMsg)],
+        ["你的消息（全文）", fmt(userChars) + " 字"],
+        ["AI 回答（每条前 500 字）", fmt(aiChars) + " 字"],
+        ["时间跨度", (first || "?").slice(0, 10) + " 至 " + (last || "?").slice(0, 10)],
+      ];
+      $("summary").innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+      $("summary").hidden = false;
+      say($("parseMsg"), "解析完成，请核对上面的数字，然后开始导入。", "ok");
+      $("s3").classList.remove("off");
+    } catch (err) {
+      say($("parseMsg"), "读取失败：" + (err && err.message ? err.message : err), "err");
+    }
+  };
+
+  // ---------- 3. 导入 ----------
+  $("go").onclick = async () => {
+    const p = state.parsed;
+    if (!p) return;
+    $("go").disabled = true;
+    const bar = $("bar");
+    bar.hidden = false; bar.value = 0;
+    try {
+      say($("importMsg"), "正在比对库里已有的对话……");
+      const { data: known, error: e1 } = await db.rpc("owner_sync_state", { p_source: p.source });
+      if (e1) throw e1;
+      const changed = MemConvert.pickChanged(p.conversations, known || {});
+      const batches = MemConvert.makeBatches(changed, BATCH_BYTES, BATCH_COUNT);
+      bar.max = Math.max(1, batches.length);
+      let done = 0, newMsgs = 0;
+      for (const b of batches) {
+        let attempt = 0;
+        for (;;) {
+          const { data, error } = await db.rpc("owner_ingest", { p: { source: p.source, conversations: b } });
+          if (!error) { newMsgs += data.messages_new || 0; break; }
+          if (++attempt >= 3) throw error;
+          await new Promise((r) => setTimeout(r, 1500 * attempt));
+        }
+        done += b.length;
+        bar.value += 1;
+        say($("importMsg"), `已上传 ${fmt(done)} / ${fmt(changed.length)} 个对话（其余 ${fmt(p.conversations.length - changed.length)} 个没有变化，跳过）`);
+      }
+      let delNote = "";
+      if ($("fullExport").checked) {
+        const { data, error } = await db.rpc("owner_mark_deleted", {
+          p_source: p.source, p_present_ids: p.conversations.map((c) => c.source_id),
+        });
+        if (error) throw error;
+        if (data.marked_deleted) delNote = `\n平台上已删除、本库保留的对话：${fmt(data.marked_deleted)} 个`;
+      }
+      const { data: st } = await db.rpc("owner_stats");
+      say($("importMsg"), `导入完成：新增消息 ${fmt(newMsgs)} 条。${delNote}\n库内共 ${fmt(st.conversations)} 个对话，待提炼 ${fmt(st.messages_waiting_distill)} 条消息，数据库已用 ${st.db_size_mb} MB / ${st.db_limit_mb} MB` + (st.db_warning ? "\n提醒：" + st.db_warning : ""), "ok");
+    } catch (err) {
+      say($("importMsg"), "导入中断：" + (err.message || err) + "\n已上传的部分不会丢；重新点「开始导入」会从中断处继续。", "err");
+    } finally {
+      $("go").disabled = false;
+    }
+  };
+
+  refreshAuth();
+})();
+</script>
+</body>
+</html>
