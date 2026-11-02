@@ -16,7 +16,7 @@ def normalize(data, source):
         raise ValueError('Not RSS')
     items = channel.findall('item')
     domain = {'cnbc': 'www.cnbc.com', 'barrons': 'www.barrons.com', 'electrek': 'electrek.co', 'eletricvehicles': 'eletric-vehicles.com', 'fttechnology': 'www.ft.com'}[source]
-    if not items or any(not (i.findtext('link') or '').startswith('https://' + domain + '/') for i in items):
+    if not items or any(not ((i.findtext('link') or '').startswith('https://' + domain + '/') or (source == 'fttechnology' and (i.findtext('link') or '').startswith('https://ig.ft.com/'))) for i in items):
         raise ValueError('Missing items or wrong source')
     for old in channel.findall('{' + ATOM + '}link'):
         channel.remove(old)
