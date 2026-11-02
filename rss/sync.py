@@ -9,7 +9,7 @@ PUBLIC = 'https://wsb511.github.io/rss/'
 ATOM = 'http://www.w3.org/2005/Atom'
 ET.register_namespace('atom', ATOM)
 
-def normalize(data, source):
+def normalize(data, source, public_name=None):
     root = ET.fromstring(data)
     channel = root.find('channel')
     if root.tag != 'rss' or channel is None:
@@ -20,7 +20,7 @@ def normalize(data, source):
         raise ValueError('Missing items or wrong source')
     for old in channel.findall('{' + ATOM + '}link'):
         channel.remove(old)
-    ET.SubElement(channel, '{' + ATOM + '}link', {'href': PUBLIC + source + '.xml', 'rel': 'self', 'type': 'application/rss+xml'})
+    ET.SubElement(channel, '{' + ATOM + '}link', {'href': PUBLIC + (public_name or source) + '.xml', 'rel': 'self', 'type': 'application/rss+xml'})
     return ET.tostring(root, encoding='utf-8', xml_declaration=True) + b'\n'
 
 def main():
@@ -38,6 +38,14 @@ def main():
                     temp = path.with_suffix('.tmp')
                     temp.write_bytes(output)
                     temp.replace(path)
+                if source == 'fttechnology':
+                    # Keep the old URL and the Feedly compatibility address in sync.
+                    alias = path.with_name('ft-technology-zh.xml')
+                    alias_output = normalize(data, source, 'ft-technology-zh')
+                    if not alias.exists() or alias.read_bytes() != alias_output:
+                        alias_temp = alias.with_suffix('.tmp')
+                        alias_temp.write_bytes(alias_output)
+                        alias_temp.replace(alias)
                 print(source + ': valid RSS snapshot')
                 break
             except Exception as error:
