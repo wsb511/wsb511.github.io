@@ -5,7 +5,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 BASE = 'https://script.google.com/macros/s/AKfycbxaLGEbhl2dvFJFN8lCBlA2my7WmgxtbRUcQdfYpMVOHfLqNOvHEeskgC4wkJqgZb-0Hg/exec'
-PUBLIC = 'https://wsb511.github.io/rss/'
+PUBLIC = 'https://raw.githubusercontent.com/wsb511/wsb511.github.io/main/rss/'
 ATOM = 'http://www.w3.org/2005/Atom'
 ET.register_namespace('atom', ATOM)
 
@@ -20,7 +20,7 @@ def normalize(data, source):
         raise ValueError('Missing items or wrong source')
     for old in channel.findall('{' + ATOM + '}link'):
         channel.remove(old)
-    ET.SubElement(channel, '{' + ATOM + '}link', {'href': ('https://raw.githubusercontent.com/wsb511/wsb511.github.io/main/rss/' if source == 'fttechnology' else PUBLIC) + source + '.xml', 'rel': 'self', 'type': 'application/rss+xml'})
+    ET.SubElement(channel, '{' + ATOM + '}link', {'href': PUBLIC + source + '.xml', 'rel': 'self', 'type': 'application/rss+xml'})
     return ET.tostring(root, encoding='utf-8', xml_declaration=True) + b'\n'
 
 def main():
