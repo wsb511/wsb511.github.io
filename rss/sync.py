@@ -15,8 +15,8 @@ def normalize(data, source):
     if root.tag != 'rss' or channel is None:
         raise ValueError('Not RSS')
     items = channel.findall('item')
-    domain = {'cnbc': 'www.cnbc.com', 'barrons': 'www.barrons.com', 'electrek': 'electrek.co', 'eletricvehicles': 'eletric-vehicles.com', 'fttechnology': 'www.ft.com'}[source]
-    if not items or any(not ((i.findtext('link') or '').startswith('https://' + domain + '/') or (source == 'fttechnology' and (i.findtext('link') or '').startswith('https://ig.ft.com/'))) for i in items):
+    domain = {'cnbc': 'www.cnbc.com', 'barrons': 'www.barrons.com', 'electrek': 'electrek.co', 'eletricvehicles': 'eletric-vehicles.com'}[source]
+    if not items or any(not ((i.findtext('link') or '').startswith('https://' + domain + '/')) for i in items):
         raise ValueError('Missing items or wrong source')
     for old in channel.findall('{' + ATOM + '}link'):
         channel.remove(old)
@@ -25,7 +25,7 @@ def normalize(data, source):
 
 def main():
     failed = []
-    for source in ('cnbc', 'barrons', 'electrek', 'eletricvehicles', 'fttechnology'):
+    for source in ('cnbc', 'barrons', 'electrek', 'eletricvehicles'):
         for attempt in range(3):
             try:
                 with urllib.request.urlopen(BASE + '?source=' + source, timeout=60) as r:
