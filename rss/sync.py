@@ -38,7 +38,8 @@ def main():
                     temp = path.with_suffix('.tmp')
                     temp.write_bytes(output)
                     temp.replace(path)
-                print(source + ': valid RSS snapshot')
+                upstream_date = ET.fromstring(output).findtext('./channel/lastBuildDate') or 'missing'
+                print(source + ': valid RSS snapshot; upstream lastBuildDate=' + upstream_date)
                 break
             except Exception as error:
                 print(source, 'attempt', attempt + 1, str(error))
