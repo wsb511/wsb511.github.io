@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      RSS_SYNC_STATUS_FILE: ${{ runner.temp }}/rss-sync-status.json
+      RSS_SYNC_STATUS_FILE: /tmp/rss-sync-${{ github.run_id }}.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
