@@ -16,12 +16,16 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      RSS_SYNC_STATUS_FILE: ${{ runner.temp }}/rss-sync-status.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Fetch and validate both feeds
+      - name: Test publisher safeguards
+        run: python -m unittest discover -s rss -p 'test_sync.py'
+      - name: Fetch and validate four feeds
         id: fetch
         continue-on-error: true
         run: python rss/sync.py
@@ -47,7 +51,8 @@ jobs:
             fi
             git fetch origin main
             git reset --hard origin/main
-            python rss/sync.py
+            # Preserve healthy sources even if a different source still fails.
+            python rss/sync.py || true
             sleep "$attempt"
           done
       - name: Publish GitHub Pages
@@ -55,5 +60,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh api --method POST "repos/${{ github.repository }}/pages/builds"
       - name: Report collection errors
-        if: steps.fetch.outcome == 'failure'
-        run: exit 1
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          status = json.loads(Path(os.environ['RSS_SYNC_STATUS_FILE']).read_text())
+          if status['failed']:
+              raise SystemExit('Old snapshots retained for: ' + ', '.join(status['failed']))
+          PY
+
